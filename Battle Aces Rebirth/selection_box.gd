@@ -38,33 +38,40 @@ func _input(event):
 				select_units_in_rect()
 				queue_redraw()
 				
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			if Input.is_key_pressed(KEY_SHIFT):
-				if not is_issuing_movement_command(event):
+		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			var target_pos = get_ground_position(event.position)
+			if target_pos != Vector3.ZERO:  # Valid position found
+				if Input.is_key_pressed(KEY_SHIFT):
+					# Queue movement command
 					for unit in selectable_units:
-						if unit.selected:
-							unit.set_selected(false)
+						if unit.selected and unit.has_method("queue_move_to"):
+							unit.queue_move_to(target_pos)
+				else:
+					# Immediate movement command
+					for unit in selectable_units:
+						if unit.selected and unit.has_method("move_to"):
+							unit.move_to(target_pos)
 					
 	elif event is InputEventMouseMotion and drawing:
 		end_pos = event.position
 		queue_redraw()
 
-func is_issuing_movement_command(event: InputEventMouseButton) -> bool:
-	if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		var viewport = get_viewport()
-		if not viewport:
-			return false
-			
-		var cam = viewport.get_camera_3d()
-		if not cam:
-			return false
-			
-		var from = cam.project_ray_origin(event.position)
-		var to = from + cam.project_ray_normal(event.position) * 1000.0
-		var space_state = viewport.world_3d.direct_space_state
-		var query = PhysicsRayQueryParameters3D.create(from, to)
-		return space_state.intersect_ray(query) != null
-	return false
+func get_ground_position(screen_pos: Vector2) -> Vector3:
+	var viewport = get_viewport()
+	if not viewport:
+		return Vector3.ZERO
+		
+	var cam = viewport.get_camera_3d()
+	if not cam:
+		return Vector3.ZERO
+		
+	var from = cam.project_ray_origin(screen_pos)
+	var to = from + cam.project_ray_normal(screen_pos) * 1000.0
+	var space_state = viewport.world_3d.direct_space_state
+	var query = PhysicsRayQueryParameters3D.create(from, to)
+	var result = space_state.intersect_ray(query)
+	
+	return result.position if result else Vector3.ZERO
 
 func _draw():
 	if drawing:
@@ -75,19 +82,26 @@ func _draw():
 func select_units_in_rect():
 	var rect = Rect2(start_pos, end_pos - start_pos).abs()
 	var selection_made = false
+	var is_shift_held = Input.is_key_pressed(KEY_SHIFT)
 	
 	for unit in selectable_units:
 		if not is_instance_valid(unit):
 			continue
 			
 		var screen_pos = camera.unproject_position(unit.global_position)
+		if not screen_pos:  # Skip if unit is behind camera
+			continue
+			
 		var unit_rect = Rect2(screen_pos - Vector2(20, 20), Vector2(40, 40))
 		if rect.intersects(unit_rect, true):
-			if Input.is_key_pressed(KEY_SHIFT):
-				unit.set_selected(!unit.selected)
+			if is_shift_held:
+				if not unit.selected:
+					unit.set_selected(true)
+					selection_made = true
 			else:
-				unit.set_selected(true)
-			selection_made = true
+				if not unit.selected:
+					unit.set_selected(true)
+					selection_made = true
 	
-	if Input.is_key_pressed(KEY_SHIFT) and not selection_made:
+	if not is_shift_held and not selection_made and (end_pos - start_pos).length() > 5:
 		clear_selection()

@@ -8,6 +8,12 @@ extends CharacterBody3D
 var selected = false
 var debug_line: ImmediateMesh
 var debug_mesh_instance: MeshInstance3D
+var movement_queue: Array = []  # Stores queued movement positions
+
+# New variables for smooth navigation
+var smooth_direction = Vector3.ZERO
+var last_valid_direction = Vector3.FORWARD
+var look_ahead_distance = 1.0  # How far ahead to look for smoother turns
 
 func _ready():
 	# Setup debug visualization
@@ -58,16 +64,37 @@ func _input_event(_camera, event, _position, _normal, _shape_idx):
 				set_selected(true)
 
 func _process(_delta):
-	if selected and nav.target_position != Vector3.ZERO:
+	if selected:
 		debug_line.clear_surfaces()
 		debug_line.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
-		var start_pos = Vector3.ZERO
-		var end_pos = to_local(nav.target_position)
-		start_pos.y = 0.1
-		end_pos.y = 0.1
-		debug_line.surface_add_vertex(start_pos)
-		debug_line.surface_add_vertex(end_pos)
+		
+		# Draw current path
+		if nav.target_position != Vector3.ZERO:
+			var start_pos = Vector3.ZERO
+			var end_pos = to_local(nav.target_position)
+			start_pos.y = 0.1
+			end_pos.y = 0.1
+			debug_line.surface_add_vertex(start_pos)
+			debug_line.surface_add_vertex(end_pos)
+		
+		# Draw queued paths
+		for i in range(movement_queue.size()):
+			var pos = to_local(movement_queue[i])
+			pos.y = 0.1
+			debug_line.surface_add_vertex(pos)
+			if i > 0:
+				debug_line.surface_add_vertex(pos)
+		
 		debug_line.surface_end()
+
+func move_to(target_pos: Vector3):
+	movement_queue.clear()
+	nav.target_position = Vector3(target_pos.x, global_position.y, target_pos.z)
+
+func queue_move_to(target_pos: Vector3):
+	movement_queue.append(Vector3(target_pos.x, global_position.y, target_pos.z))
+	if movement_queue.size() == 1:
+		nav.target_position = movement_queue[0]
 
 func _unhandled_input(event):
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
@@ -93,23 +120,57 @@ func _unhandled_input(event):
 		
 		var result = space_state.intersect_ray(query)
 		if result:
-			nav.target_position = Vector3(result.position.x, global_position.y, result.position.z)
+			if Input.is_key_pressed(KEY_SHIFT):
+				queue_move_to(result.position)
+			else:
+				move_to(result.position)
 
 func _physics_process(delta):
-	var direction = nav.get_next_path_position() - global_position
-	direction.y = 0
+	# Stop if very close to target
+	if nav.target_position != Vector3.ZERO and global_position.distance_to(nav.target_position) < 0.3:
+		velocity = Vector3.ZERO
+		
+		# Process movement queue
+		if movement_queue.size() > 0:
+			movement_queue.pop_front()
+			if movement_queue.size() > 0:
+				nav.target_position = movement_queue[0]
+			else:
+				nav.target_position = Vector3.ZERO
+		return
+	
+	# Get next path positions
+	var immediate_target = nav.get_next_path_position()
+	var look_ahead_target = nav.get_next_path_position()
+	
+	# Calculate direction with look-ahead
+	var raw_direction = (look_ahead_target - global_position)
+	raw_direction.y = 0
+	
+	if raw_direction.length() > 0.1:
+		smooth_direction = smooth_direction.lerp(raw_direction.normalized(), 5.0 * delta)
+		last_valid_direction = smooth_direction.normalized()
+	else:
+		smooth_direction = last_valid_direction
 
-	if direction.length() > 0.1:
-		direction = direction.normalized()
-		velocity = velocity.lerp(direction * speed, accel * delta)
+	# Movement handling
+	if smooth_direction.length() > 0.1:
+		var immediate_dir = (immediate_target - global_position).normalized()
+		velocity = velocity.lerp(immediate_dir * speed, accel * delta)
 		move_and_slide()
-
-		var current_dir = -transform.basis.z
-		var new_dir = current_dir.slerp(direction, 10.0 * delta).normalized()
-		look_at(global_position + new_dir, Vector3.UP)
+		
+		# Rotation handling
+		if velocity.length() > 0.5:
+			var look_position = global_position + smooth_direction
+			look_at(look_position, Vector3.UP)
+			var forward = -transform.basis.z
+			if forward.dot(smooth_direction) < 0:
+				rotate_y(PI)
 	else:
 		velocity = Vector3.ZERO
 
+	# Animation handling - always play walk but scale speed to simulate stopping
 	anim.play("walk")
 	var move_speed = velocity.length()
-	anim.speed_scale = clamp(move_speed / speed * 3.0, 1.0, 3.0)
+	# Scale from 0.5 (stopped) to 3.0 (full speed)
+	anim.speed_scale = clamp(0.5 + (move_speed / speed) * 2.5, 0.5, 3.0)
