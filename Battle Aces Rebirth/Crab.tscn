@@ -3242,7 +3242,6 @@ shape = SubResource("CylinderShape3D_j83y2")
 
 [node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
 keep_y_velocity = false
-debug_enabled = true
 
 [node name="SelectionIndicator" type="MeshInstance3D" parent="."]
 transform = Transform3D(1.92981, 0, 0, 0, 1, 0, 0, 0, 1.92981, 0, 0.477676, 0)

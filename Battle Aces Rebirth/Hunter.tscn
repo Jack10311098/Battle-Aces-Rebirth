@@ -1725,4 +1725,3 @@ skeleton = NodePath("")
 
 [node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
 keep_y_velocity = false
-debug_enabled = true
