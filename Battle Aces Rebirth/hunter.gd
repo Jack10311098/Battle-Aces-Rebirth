@@ -83,20 +83,16 @@ func _process(_delta):
 			pos.y = 0.1
 			debug_line.surface_add_vertex(pos)
 			if i > 0:
-				debug_line.surface_add_vertex(pos)  # Draw line between points
+				debug_line.surface_add_vertex(pos)
 		
 		debug_line.surface_end()
 
 func move_to(target_pos: Vector3):
-	# Immediate movement - clear queue and move directly
 	movement_queue.clear()
 	nav.target_position = Vector3(target_pos.x, global_position.y, target_pos.z)
 
 func queue_move_to(target_pos: Vector3):
-	# Add position to movement queue
 	movement_queue.append(Vector3(target_pos.x, global_position.y, target_pos.z))
-	
-	# If this is the first queued position, start moving to it
 	if movement_queue.size() == 1:
 		nav.target_position = movement_queue[0]
 
@@ -130,54 +126,51 @@ func _unhandled_input(event):
 				move_to(result.position)
 
 func _physics_process(delta):
-	# Process movement queue when reaching current target
-	if nav.target_position != Vector3.ZERO and global_position.distance_to(nav.target_position) < 0.5:
+	# Stop if very close to target
+	if nav.target_position != Vector3.ZERO and global_position.distance_to(nav.target_position) < 0.3:
+		velocity = Vector3.ZERO
+		
+		# Process movement queue
 		if movement_queue.size() > 0:
-			movement_queue.pop_front()  # Remove completed position
-			
+			movement_queue.pop_front()
 			if movement_queue.size() > 0:
-				nav.target_position = movement_queue[0]  # Move to next position
+				nav.target_position = movement_queue[0]
 			else:
-				nav.target_position = Vector3.ZERO  # Clear target when queue empty
+				nav.target_position = Vector3.ZERO
+		return
 	
-	# Get next path positions for smoother movement
+	# Get next path positions
 	var immediate_target = nav.get_next_path_position()
 	var look_ahead_target = nav.get_next_path_position()
 	
-	# Calculate direction with some look-ahead to smooth turns
+	# Calculate direction with look-ahead
 	var raw_direction = (look_ahead_target - global_position)
 	raw_direction.y = 0
 	
 	if raw_direction.length() > 0.1:
-		# Smooth the direction changes to handle navigation mesh vertices
 		smooth_direction = smooth_direction.lerp(raw_direction.normalized(), 5.0 * delta)
 		last_valid_direction = smooth_direction.normalized()
 	else:
 		smooth_direction = last_valid_direction
 
-	# Only proceed if we have valid movement
+	# Movement handling
 	if smooth_direction.length() > 0.1:
-		# Calculate movement using immediate target for precise navigation
 		var immediate_dir = (immediate_target - global_position).normalized()
 		velocity = velocity.lerp(immediate_dir * speed, accel * delta)
-		
-		# Move the character
 		move_and_slide()
 		
-		# Calculate rotation only if moving significantly
+		# Rotation handling
 		if velocity.length() > 0.5:
-			# Use the smoothed direction for facing to avoid wall-facing at vertices
 			var look_position = global_position + smooth_direction
 			look_at(look_position, Vector3.UP)
-			
-			# Ensure we're not facing backwards
 			var forward = -transform.basis.z
 			if forward.dot(smooth_direction) < 0:
-				rotate_y(PI)  # Flip 180 degrees if we're facing backwards
+				rotate_y(PI)
 	else:
 		velocity = Vector3.ZERO
 
-	# Animation handling
+	# Animation handling - always play walk but scale speed to simulate stopping
 	anim.play("walk")
 	var move_speed = velocity.length()
-	anim.speed_scale = clamp(move_speed / speed * 3.0, 1.0, 3.0)
+	# Scale from 0.5 (stopped) to 3.0 (full speed)
+	anim.speed_scale = clamp(0.5 + (move_speed / speed) * 2.5, 0.5, 3.0)
